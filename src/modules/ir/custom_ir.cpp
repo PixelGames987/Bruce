@@ -239,12 +239,23 @@ void otherIRcodes() {
         // no need to proceed, go back
     }
 
+    // Initialize current directory - start from BruceIR folder
+    String currentDir = "/BruceIR";
+
     // File selection loop - go back here after sending commands
     while (true) {
         // select a file to tx
         if (!(*fs).exists("/BruceIR")) (*fs).mkdir("/BruceIR");
-        filepath = loopSD(*fs, true, "IR", "/BruceIR");
+        filepath = loopSD(*fs, true, "IR", currentDir);
         if (filepath == "") return; //  cancelled
+        
+        // Update current directory based on selected file's directory
+        // Extract directory from filepath (everything before the last '/')
+        int lastSlash = filepath.lastIndexOf('/');
+        if (lastSlash >= 0) {
+            currentDir = filepath.substring(0, lastSlash);
+            if (currentDir == "") currentDir = "/"; // Handle root directory case
+        }
 
         // select mode
         bool exit = false;
