@@ -239,105 +239,110 @@ void otherIRcodes() {
         // no need to proceed, go back
     }
 
-    // select a file to tx
-    if (!(*fs).exists("/BruceIR")) (*fs).mkdir("/BruceIR");
-    filepath = loopSD(*fs, true, "IR", "/BruceIR");
-    if (filepath == "") return; //  cancelled
+    // File selection loop - go back here after sending commands
+    while (true) {
+        // select a file to tx
+        if (!(*fs).exists("/BruceIR")) (*fs).mkdir("/BruceIR");
+        filepath = loopSD(*fs, true, "IR", "/BruceIR");
+        if (filepath == "") return; //  cancelled
 
-    // select mode
-    bool exit = false;
-    bool mode_cmd = true;
-    options = {
-        {"Choose cmd", [&]() { mode_cmd = true; } },
-        {"Spam all",   [&]() { mode_cmd = false; }},
-        {"Menu",       [&]() { exit = true; }     },
-    };
+        // select mode
+        bool exit = false;
+        bool mode_cmd = true;
+        options = {
+            {"Choose cmd", [&]() { mode_cmd = true; } },
+            {"Spam all",   [&]() { mode_cmd = false; }},
+            {"Menu",       [&]() { exit = true; }     },
+        };
 
-    loopOptions(options);
+        loopOptions(options);
 
-    if (exit == true) return;
+        if (exit == true) return;
 
-    if (mode_cmd == false) {
-        // Spam all selected
-        txIrFile(fs, filepath);
-        return;
-    }
+        if (mode_cmd == false) {
+            // Spam all selected
+            txIrFile(fs, filepath);
+            continue; // Go back to file selection
+        }
 
-    // else continue and try to parse the file
+        // else continue and try to parse the file
 
-    databaseFile = fs->open(filepath, FILE_READ);
-    drawMainBorder();
+        databaseFile = fs->open(filepath, FILE_READ);
+        drawMainBorder();
 
-    if (!databaseFile) {
-        Serial.println("Failed to open database file.");
-        // displayError("Fail to open file");
-        // delay(2000);
-        return;
-    }
-    Serial.println("Opened database file.");
+        if (!databaseFile) {
+            Serial.println("Failed to open database file.");
+            // displayError("Fail to open file");
+            // delay(2000);
+            continue; // Go back to file selection
+        }
+        Serial.println("Opened database file.");
 
-    pinMode(bruceConfig.irTx, OUTPUT);
-    // digitalWrite(bruceConfig.irTx, LED_ON);
+        pinMode(bruceConfig.irTx, OUTPUT);
+        // digitalWrite(bruceConfig.irTx, LED_ON);
 
-    // Mode to choose and send command by command limitted to 100 commands
-    String line;
-    String txt;
-    codes.push_back(new IRCode());
-    while (databaseFile.available() && total_codes < 100) {
-        line = databaseFile.readStringUntil('\n');
-        txt = line.substring(line.indexOf(":") + 1);
-        txt.trim();
-        if (line.startsWith("name:")) {
-            // in case that the separation between codes are not made by "#" line
-            if (codes[total_codes]->name != "") {
+        // Mode to choose and send command by command limitted to 100 commands
+        String line;
+        String txt;
+        codes.push_back(new IRCode());
+        while (databaseFile.available() && total_codes < 100) {
+            line = databaseFile.readStringUntil('\n');
+            txt = line.substring(line.indexOf(":") + 1);
+            txt.trim();
+            if (line.startsWith("name:")) {
+                // in case that the separation between codes are not made by "#" line
+                if (codes[total_codes]->name != "") {
+                    total_codes++;
+                    codes.push_back(new IRCode());
+                }
+                // save signal name
+                codes[total_codes]->name = txt;
+                codes[total_codes]->filepath = txt + " " + filepath.substring(1 + filepath.lastIndexOf("/"));
+            }
+            if (line.startsWith("type:")) codes[total_codes]->type = txt;
+            if (line.startsWith("protocol:")) codes[total_codes]->protocol = txt;
+            if (line.startsWith("address:")) codes[total_codes]->address = txt;
+            if (line.startsWith("frequency:")) codes[total_codes]->frequency = txt.toInt();
+            if (line.startsWith("bits:")) codes[total_codes]->bits = txt.toInt();
+            if (line.startsWith("command:")) codes[total_codes]->command = txt;
+            if (line.startsWith("data:") || line.startsWith("value:") || line.startsWith("state:")) {
+                codes[total_codes]->data = txt;
+            }
+            // if there are a line with "#", and the code name isnt't "" (there are a signal saved), go to next
+            // signal
+            if (line.startsWith("#") && total_codes < codes.size() && codes[total_codes]->name != "") {
                 total_codes++;
                 codes.push_back(new IRCode());
             }
-            // save signal name
-            codes[total_codes]->name = txt;
-            codes[total_codes]->filepath = txt + " " + filepath.substring(1 + filepath.lastIndexOf("/"));
+            // if(line.startsWith("duty_cycle:")) codes[total_codes]->duty_cycle = txt.toFloat();
         }
-        if (line.startsWith("type:")) codes[total_codes]->type = txt;
-        if (line.startsWith("protocol:")) codes[total_codes]->protocol = txt;
-        if (line.startsWith("address:")) codes[total_codes]->address = txt;
-        if (line.startsWith("frequency:")) codes[total_codes]->frequency = txt.toInt();
-        if (line.startsWith("bits:")) codes[total_codes]->bits = txt.toInt();
-        if (line.startsWith("command:")) codes[total_codes]->command = txt;
-        if (line.startsWith("data:") || line.startsWith("value:") || line.startsWith("state:")) {
-            codes[total_codes]->data = txt;
+        options = {};
+        for (auto code : codes) {
+            if (code->name != "") {
+                options.push_back({code->name.c_str(), [code]() {
+                                       sendIRCommand(code);
+                                       addToRecentCodes(code);
+                                   }});
+            }
         }
-        // if there are a line with "#", and the code name isnt't "" (there are a signal saved), go to next
-        // signal
-        if (line.startsWith("#") && total_codes < codes.size() && codes[total_codes]->name != "") {
-            total_codes++;
-            codes.push_back(new IRCode());
-        }
-        // if(line.startsWith("duty_cycle:")) codes[total_codes]->duty_cycle = txt.toFloat();
-    }
-    options = {};
-    for (auto code : codes) {
-        if (code->name != "") {
-            options.push_back({code->name.c_str(), [code]() {
-                                   sendIRCommand(code);
-                                   addToRecentCodes(code);
-                               }});
-        }
-    }
-    options.push_back({"Main Menu", [&]() { exit = true; }});
-    databaseFile.close();
+        options.push_back({"Back", [&]() { exit = true; }});
+        databaseFile.close();
 
- #ifdef USE_BOOST  ///DISABLE 5V OUTPUT
-  PPM.disableOTG();
-  #endif
+     #ifdef USE_BOOST  ///DISABLE 5V OUTPUT
+      PPM.disableOTG();
+      #endif
 
 
-    digitalWrite(bruceConfig.irTx, LED_OFF);
-    int idx = 0;
-    while (1) {
-        idx = loopOptions(options, idx);
-        if (check(EscPress) || exit) break;
-    }
-    options.clear();
+        digitalWrite(bruceConfig.irTx, LED_OFF);
+        int idx = 0;
+        while (1) {
+            idx = loopOptions(options, idx);
+            if (check(EscPress) || exit) break;
+        }
+        options.clear();
+        resetCodesArray(); // Reset codes for next file
+        exit = false; // Reset exit flag for next iteration
+    } // End of file selection loop
 } // end of otherIRcodes
 
 // IR commands
